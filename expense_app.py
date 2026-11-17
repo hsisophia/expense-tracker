@@ -14,6 +14,11 @@ from expense_input import load_expenses, parse_amount, parse_date, save_expense
 
 PORT = 8000
 
+
+def fmt_amount(value):
+    v = float(value)
+    return f"{v:,.0f}" if v == int(v) else f"{v:,.1f}"
+
 CSS = """
 :root{--bg:#f4f3ef;--card:#fff;--ink:#0b0b0b;--ink2:#52514e;--line:#e4e3dd;--blue:#2a78d6;--red:#e34948}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);
@@ -47,7 +52,7 @@ def render_page(error="", chart="pie"):
     top = next(iter(totals), "-")
     rows = "".join(
         f"<tr><td>{html.escape(e['date'])}</td><td>{html.escape(e['category'])}</td>"
-        f"<td class='n'>{float(e['amount']):,.2f}</td><td>{html.escape(e.get('notes') or '')}</td></tr>"
+        f"<td class='n'>{fmt_amount(e['amount'])}</td><td>{html.escape(e.get('notes') or '')}</td></tr>"
         for e in reversed(expenses[-15:]))
     err = f"<div class='err'>{html.escape(error)}</div>" if error else ""
     if expenses:
@@ -67,7 +72,7 @@ def render_page(error="", chart="pie"):
 <section class="card"><h2>Add expense</h2>{err}
 <form method="post" action="/add">
 <label>Date</label><input type="date" name="date" required>
-<label>Amount</label><input type="number" name="amount" step="0.01" min="0.01" placeholder="e.g. 120" required>
+<label>Amount</label><input type="number" name="amount" step="0.1" min="0.1" placeholder="e.g. 120 or 45.5" required>
 <label>Category</label><input name="category" list="cats" placeholder="Food, Transport..." required>
 <datalist id="cats"><option>Food<option>Transport<option>Shopping<option>Entertainment<option>Education</datalist>
 <label>Notes (optional)</label><input name="notes" placeholder="Lunch with friends">
