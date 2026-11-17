@@ -10,7 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 import expense_chart
-from expense_input import load_expenses, parse_amount, parse_date, save_expense
+from expense_input import delete_expense, load_expenses, parse_amount, parse_date, save_expense
 
 PORT = 8000
 
@@ -41,6 +41,8 @@ color:var(--ink2);border:1px solid var(--line);font-size:14px}.tabs a.on{backgro
 .wide{grid-column:1/-1}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:9px 8px;
 border-bottom:1px solid var(--line)}th{font-size:12px;color:var(--ink2);text-transform:uppercase;letter-spacing:.05em}
 td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+button.del{margin:0;width:auto;padding:4px 12px;background:#fff;color:var(--red);border:1px solid var(--line);font-weight:500}
+button.del:hover{background:#fdecec;filter:none}td.act{text-align:right;width:1%}
 @media(max-width:820px){main{grid-template-columns:1fr}.stats{grid-template-columns:1fr}}
 """
 
@@ -52,8 +54,10 @@ def render_page(error="", chart="pie"):
     top = next(iter(totals), "-")
     rows = "".join(
         f"<tr><td>{html.escape(e['date'])}</td><td>{html.escape(e['category'])}</td>"
-        f"<td class='n'>{fmt_amount(e['amount'])}</td><td>{html.escape(e.get('notes') or '')}</td></tr>"
-        for e in reversed(expenses[-15:]))
+        f"<td class='n'>{fmt_amount(e['amount'])}</td><td>{html.escape(e.get('notes') or '')}</td>"
+        f"<td class='act'><form method='post' action='/delete' onsubmit=\"return confirm('Delete this expense?')\">"
+        f"<input type='hidden' name='index' value='{i}'><button class='del'>Delete</button></form></td></tr>"
+        for i, e in reversed(list(enumerate(expenses))[-15:]))
     err = f"<div class='err'>{html.escape(error)}</div>" if error else ""
     if expenses:
         tabs = "".join(f"<a href='/?chart={k}' class='{'on' if chart == k else ''}'>{n}</a>"
@@ -80,7 +84,7 @@ def render_page(error="", chart="pie"):
 <script>document.querySelector('input[type=date]').valueAsDate=new Date()</script></section>
 <section class="card chart"><h2>Spending by category</h2>{chart_html}</section>
 <section class="card wide"><h2>Recent expenses</h2>
-<table><tr><th>Date</th><th>Category</th><th class="n">Amount</th><th>Notes</th></tr>{rows}</table></section>
+<table><tr><th>Date</th><th>Category</th><th class="n">Amount</th><th>Notes</th><th></th></tr>{rows}</table></section>
 </main></html>"""
 
 
@@ -110,10 +114,19 @@ class Handler(BaseHTTPRequestHandler):
         self._send("not found", "text/plain", 404)
 
     def do_POST(self):
-        if self.path != "/add":
+        if self.path not in ("/add", "/delete"):
             return self._send("not found", "text/plain", 404)
         form = parse_qs(self.rfile.read(int(self.headers.get("Content-Length", 0))).decode())
         get = lambda k: form.get(k, [""])[0].strip()
+        if self.path == "/delete":
+            try:
+                delete_expense(int(get("index")))
+            except (ValueError, IndexError):
+                pass
+            self.send_response(303)
+            self.send_header("Location", "/")
+            self.end_headers()
+            return
         try:
             save_expense({"date": parse_date(get("date")), "amount": parse_amount(get("amount")),
                           "category": get("category") or "Other", "notes": get("notes")})

@@ -25,6 +25,18 @@ def save_expense(expense, path=DATA_FILE):
         writer.writerow(expense)
 
 
+def delete_expense(index, path=DATA_FILE):
+    """Remove the expense at row `index` (0-based, in file order) and rewrite the CSV."""
+    rows = load_expenses(path)
+    if not 0 <= index < len(rows):
+        raise IndexError("no such expense")
+    del rows[index]
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=FIELDS)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
 def parse_date(text):
     return datetime.strptime(text.strip(), "%Y-%m-%d").strftime("%Y-%m-%d")
 
