@@ -10,6 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlencode, urlparse
 
 import expense_chart
+import expense_trend
 from expense_input import delete_expense, load_expenses, parse_amount, parse_date, save_expense
 
 PORT = 8000
@@ -81,12 +82,14 @@ def render_page(error="", chart="pie", month=""):
     err = f"<div class='err'>{html.escape(error)}</div>" if error else ""
     if all_expenses:
         tabs = "".join(f"<a href='/?{urlencode({'chart': k, 'month': month})}' class='{'on' if chart == k else ''}'>{n}</a>"
-                       for k, n in (("pie", "Donut chart"), ("bar", "Bar chart")))
+                       for k, n in (("pie", "Donut chart"), ("bar", "Bar chart"), ("trend", "Monthly trend")))
         options = "<option value=''>All months</option>" + "".join(
             f"<option value='{m}'{' selected' if m == month else ''}>{m}</option>" for m in months)
         picker = (f"<form class='filter' method='get' action='/'><input type='hidden' name='chart' value='{chart}'>"
                   f"Month <select name='month' onchange='this.form.submit()'>{options}</select></form>")
         img = f"<img src='/chart.png?{urlencode({'kind': chart, 'month': month, 'n': len(all_expenses)})}' alt='chart'>"
+        if chart == "trend":
+            picker = ""  # the trend chart always shows every month
         chart_html = f"{picker}<div class='tabs'>{tabs}</div>{img}"
     else:
         chart_html = "<div class='empty'>No data yet. Add your first expense on the left.</div>"
@@ -126,13 +129,17 @@ class Handler(BaseHTTPRequestHandler):
         url = urlparse(self.path)
         q = parse_qs(url.query)
         if url.path == "/chart.png":
-            expenses = filter_month(load_expenses(), q.get("month", [""])[0])
+            kind = q.get("kind", ["pie"])[0]
+            expenses = load_expenses() if kind == "trend" else filter_month(load_expenses(), q.get("month", [""])[0])
             if not expenses:
                 return self._send("no data", "text/plain", 404)
-            totals = expense_chart.totals_by_category(expenses)
-            fn = expense_chart.make_bar if q.get("kind", ["pie"])[0] == "bar" else expense_chart.make_pie
             buf = io.BytesIO()
-            fn(totals, buf)
+            if kind == "trend":
+                expense_trend.make_trend(expense_trend.monthly_totals(expenses), buf)
+            else:
+                totals = expense_chart.totals_by_category(expenses)
+                fn = expense_chart.make_bar if kind == "bar" else expense_chart.make_pie
+                fn(totals, buf)
             return self._send(buf.getvalue(), "image/png")
         if url.path == "/":
             return self._send(render_page(chart=q.get("chart", ["pie"])[0], month=q.get("month", [""])[0]))
