@@ -5,6 +5,10 @@ from collections import defaultdict
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+plt.rcParams["font.family"] = "sans-serif"
+plt.rcParams["font.sans-serif"] = ["Microsoft JhengHei", "Microsoft YaHei", "PingFang TC", "Heiti TC",
+                                   "Noto Sans CJK TC", "Noto Sans TC", "SimHei", "DejaVu Sans"]
+plt.rcParams["axes.unicode_minus"] = False
 from matplotlib.lines import Line2D
 
 # 統一配色（對應範例圖表：藍、橘、綠、黃、粉紅，並擴充至 8 色）
