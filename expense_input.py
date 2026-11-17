@@ -3,6 +3,7 @@ import csv
 import os
 import sys
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 
 DATA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "expenses.csv")
 FIELDS = ["date", "amount", "category", "notes"]
@@ -29,10 +30,18 @@ def parse_date(text):
 
 
 def parse_amount(text):
-    value = float(text)
-    if value <= 0:
+    """Accept a positive integer or a number with at most one decimal place."""
+    try:
+        value = Decimal(text.strip())
+    except InvalidOperation:
+        raise ValueError("amount must be a number")
+    if not value.is_finite() or value <= 0:
         raise ValueError("amount must be positive")
-    return f"{value:.2f}"
+    if value > 1_000_000:
+        raise ValueError("amount is too large")
+    if value != value.quantize(Decimal("0.1")):
+        raise ValueError("use a whole number or at most 1 decimal place")
+    return str(int(value)) if value == value.to_integral_value() else f"{value:.1f}"
 
 
 def ask(prompt, parser):
