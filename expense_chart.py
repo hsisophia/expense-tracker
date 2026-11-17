@@ -1,6 +1,6 @@
 import csv
-import sys
 import os
+import sys
 from collections import defaultdict
 import matplotlib
 matplotlib.use("Agg")
@@ -20,33 +20,36 @@ PALETTE = [
 ]
 
 
-def load_expenses(csv_path="expenses.csv"):
-    """讀取 CSV 檔案並依類別加總金額，由高到低排序。"""
-    totals = defaultdict(float)
-    if not os.path.exists(csv_path):
-        raise FileNotFoundError(f"找不到資料檔案：{csv_path}")
+def totals_by_category(expenses):
+    """將支出紀錄列表依類別加總並由高到低排序（回傳有序 dict 供網頁介面與圖表使用）。"""
+    raw = defaultdict(float)
+    for row in expenses:
+        category = str(row.get("category") or "Uncategorized").strip()
+        try:
+            amount = float(row.get("amount", 0))
+        except (ValueError, TypeError):
+            continue
+        if amount > 0:
+            raw[category] += amount
 
-    with open(csv_path, mode="r", encoding="utf-8-sig", newline="") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            category = (row.get("category") or "Uncategorized").strip()
-            try:
-                amount = float(row.get("amount", 0))
-            except ValueError:
-                continue
-            if amount > 0:
-                totals[category] += amount
-
-    # 依金額由大到小排序
-    sorted_items = sorted(totals.items(), key=lambda x: x[1], reverse=True)
-
-    # 若超過 8 類，將第 8 類之後合併為 Other
+    sorted_items = sorted(raw.items(), key=lambda x: x[1], reverse=True)
     if len(sorted_items) > 8:
         top_seven = sorted_items[:7]
         other_sum = sum(val for _, val in sorted_items[7:])
         sorted_items = top_seven + [("Other", other_sum)]
 
-    return sorted_items
+    return dict(sorted_items)
+
+
+def load_expenses(csv_path="expenses.csv"):
+    """獨立執行時從 CSV 讀取支出列表。"""
+    if not os.path.exists(csv_path):
+        raise FileNotFoundError(f"找不到資料檔案：{csv_path}")
+    records = []
+    with open(csv_path, mode="r", encoding="utf-8-sig", newline="") as f:
+        for row in csv.DictReader(f):
+            records.append(row)
+    return records
 
 
 def _format_num(val):
@@ -56,14 +59,35 @@ def _format_num(val):
     return f"{val:,.2f}"
 
 
-def generate_pie_chart(csv_path="expenses.csv", output_path="pie_chart.png"):
-    """產生甜甜圈圖（Donut Chart），含中央總金額與右側圓點圖例。"""
-    items = load_expenses(csv_path)
-    if not items:
-        raise ValueError("CSV 檔案中沒有有效的支出資料。")
+def _prepare_totals(data_or_path):
+    """同時支援傳入 totals 字典、支出紀錄 list，或 CSV 檔案路徑。"""
+    if isinstance(data_or_path, dict):
+        items = sorted(data_or_path.items(), key=lambda x: x[1], reverse=True)
+        if len(items) > 8:
+            items = items[:7] + [("Other", sum(v for _, v in items[7:]))]
+        return dict(items)
+    if isinstance(data_or_path, list):
+        return totals_by_category(data_or_path)
+    return totals_by_category(load_expenses(data_or_path))
 
-    categories = [k for k, _ in items]
-    amounts = [v for _, v in items]
+
+def _save_fig(fig, output_target):
+    """同時支援檔案路徑字串與 io.BytesIO() 記憶體緩衝區。"""
+    if isinstance(output_target, (str, os.PathLike)):
+        with open(output_target, "wb") as f:
+            fig.savefig(f, format="png", dpi=150)
+    else:
+        fig.savefig(output_target, format="png", dpi=150)
+
+
+def make_pie(totals, output_path="pie_chart.png"):
+    """產生甜甜圈圖（Donut Chart），供 expense_app.py 與單獨執行呼叫。"""
+    data = _prepare_totals(totals)
+    if not data:
+        raise ValueError("沒有有效的支出資料可供繪圖。")
+
+    categories = list(data.keys())
+    amounts = list(data.values())
     total_spent = sum(amounts)
     colors = [PALETTE[i % len(PALETTE)] for i in range(len(categories))]
 
@@ -71,8 +95,7 @@ def generate_pie_chart(csv_path="expenses.csv", output_path="pie_chart.png"):
     fig.patch.set_facecolor("white")
     ax.set_facecolor("white")
 
-    # 繪製甜甜圈圖（從 12 點鐘方向順時針排列）
-    wedges, _ = ax.pie(
+    ax.pie(
         amounts,
         colors=colors,
         startangle=90,
@@ -80,7 +103,6 @@ def generate_pie_chart(csv_path="expenses.csv", output_path="pie_chart.png"):
         wedgeprops=dict(width=0.37, edgecolor="white", linewidth=2.5),
     )
 
-    # 中央總金額與 TOTAL SPENT 標籤
     ax.text(
         0, 0.05,
         _format_num(total_spent),
@@ -94,7 +116,6 @@ def generate_pie_chart(csv_path="expenses.csv", output_path="pie_chart.png"):
         fontsize=10.5, color="#555555",
     )
 
-    # 右側圓點圖例（顯示類別、金額與百分比）
     legend_handles = []
     for cat, amt, color in zip(categories, amounts, colors):
         pct = (amt / total_spent) * 100
@@ -124,22 +145,21 @@ def generate_pie_chart(csv_path="expenses.csv", output_path="pie_chart.png"):
 
     ax.set_aspect("equal")
     plt.subplots_adjust(left=0.04, right=0.58, top=0.84, bottom=0.06)
-    fig.savefig(output_path, dpi=150)
+    _save_fig(fig, output_path)
     plt.close(fig)
     return output_path
 
 
-def generate_bar_chart(csv_path="expenses.csv", output_path="bar_chart.png"):
-    """產生水平長條圖（Horizontal Bar Chart），含右側數值標籤。"""
-    items = load_expenses(csv_path)
-    if not items:
-        raise ValueError("CSV 檔案中沒有有效的支出資料。")
+def make_bar(totals, output_path="bar_chart.png"):
+    """產生水平長條圖（Horizontal Bar Chart），供 expense_app.py 與單獨執行呼叫。"""
+    data = _prepare_totals(totals)
+    if not data:
+        raise ValueError("沒有有效的支出資料可供繪圖。")
 
-    # 水平長條圖由下往上繪製，反轉順序讓最大金額顯示在最上方
-    items_rev = list(reversed(items))
+    items_rev = list(reversed(list(data.items())))
     categories = [k for k, _ in items_rev]
     amounts = [v for _, v in items_rev]
-    colors = [PALETTE[i % len(PALETTE)] for i in range(len(items) - 1, -1, -1)]
+    colors = [PALETTE[i % len(PALETTE)] for i in range(len(data) - 1, -1, -1)]
 
     fig, ax = plt.subplots(figsize=(9, 5.5), dpi=150)
     fig.patch.set_facecolor("white")
@@ -147,7 +167,6 @@ def generate_bar_chart(csv_path="expenses.csv", output_path="bar_chart.png"):
 
     bars = ax.barh(categories, amounts, color=colors, height=0.55)
 
-    # 隱藏上、右、下邊框與 X 軸刻度，僅保留左側細灰線
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
     ax.spines["bottom"].set_visible(False)
@@ -156,7 +175,6 @@ def generate_bar_chart(csv_path="expenses.csv", output_path="bar_chart.png"):
     ax.xaxis.set_visible(False)
     ax.tick_params(axis="y", length=0, labelsize=12, pad=8, colors="#111111")
 
-    # 在每條長條右側加上金額數字
     max_amt = max(amounts) if amounts else 1
     ax.set_xlim(0, max_amt * 1.16)
     for bar, amt in zip(bars, amounts):
@@ -175,16 +193,13 @@ def generate_bar_chart(csv_path="expenses.csv", output_path="bar_chart.png"):
     )
 
     plt.subplots_adjust(left=0.18, right=0.94, top=0.86, bottom=0.06)
-    fig.savefig(output_path, dpi=150)
+    _save_fig(fig, output_path)
     plt.close(fig)
     return output_path
 
 
-def generate_charts(csv_path="expenses.csv"):
-    """同時產生圓餅圖與長條圖（供單獨執行與網頁介面呼叫）。"""
-    pie_file = generate_pie_chart(csv_path, "pie_chart.png")
-    bar_file = generate_bar_chart(csv_path, "bar_chart.png")
-    return pie_file, bar_file
+generate_pie_chart = make_pie
+generate_bar_chart = make_bar
 
 
 if __name__ == "__main__":
@@ -192,5 +207,7 @@ if __name__ == "__main__":
     if not os.path.exists(target_csv) and os.path.exists("sample_expenses.csv"):
         target_csv = "sample_expenses.csv"
 
-    pie_out, bar_out = generate_charts(target_csv)
+    totals = totals_by_category(load_expenses(target_csv))
+    pie_out = make_pie(totals, "pie_chart.png")
+    bar_out = make_bar(totals, "bar_chart.png")
     print(f"已產生圖表：{pie_out}, {bar_out}")

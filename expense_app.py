@@ -5,7 +5,6 @@ Run:  python expense_app.py   then open http://127.0.0.1:8000
 import html
 import io
 import sys
-import tempfile
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
@@ -98,9 +97,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send("no data", "text/plain", 404)
             totals = expense_chart.totals_by_category(expenses)
             fn = expense_chart.make_bar if q.get("kind", ["pie"])[0] == "bar" else expense_chart.make_pie
-            with tempfile.NamedTemporaryFile(suffix=".png") as tmp:
-                fn(totals, tmp.name)
-                return self._send(open(tmp.name, "rb").read(), "image/png")
+            buf = io.BytesIO()
+            fn(totals, buf)
+            buf.seek(0)
+            return self._send(buf.read(), "image/png")
         if url.path == "/":
             return self._send(render_page(chart=q.get("chart", ["pie"])[0]))
         self._send("not found", "text/plain", 404)
