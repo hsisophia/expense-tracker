@@ -44,4 +44,4 @@ Data is stored in `expenses.csv` (columns: `date, amount, category, notes`).
 
 ## Demo video
 
-<paste YouTube link here>
+<https://youtu.be/FgZRKpwEiok>
