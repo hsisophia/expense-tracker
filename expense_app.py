@@ -7,9 +7,10 @@ import io
 import sys
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
 
 import expense_chart
+import expense_trend
 from expense_input import delete_expense, load_expenses, parse_amount, parse_date, save_expense
 
 PORT = 8000
@@ -18,6 +19,19 @@ PORT = 8000
 def fmt_amount(value):
     v = float(value)
     return f"{v:,.0f}" if v == int(v) else f"{v:,.1f}"
+
+def month_of(expense):
+    """'2026-11-14' -> '2026-11'."""
+    return expense["date"][:7]
+
+
+def list_months(expenses):
+    return sorted({month_of(e) for e in expenses}, reverse=True)
+
+
+def filter_month(expenses, month):
+    return [e for e in expenses if month_of(e) == month] if month else expenses
+
 
 CSS = """
 :root{--bg:#f4f3ef;--card:#fff;--ink:#0b0b0b;--ink2:#52514e;--line:#e4e3dd;--blue:#2a78d6;--red:#e34948}
@@ -40,6 +54,8 @@ color:var(--ink2);border:1px solid var(--line);font-size:14px}.tabs a.on{backgro
 .chart img{width:100%;height:auto;display:block}.empty{color:var(--ink2);padding:40px 0;text-align:center}
 .wide{grid-column:1/-1}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:9px 8px;
 border-bottom:1px solid var(--line)}th{font-size:12px;color:var(--ink2);text-transform:uppercase;letter-spacing:.05em}
+.filter{margin-bottom:12px;display:flex;align-items:center;gap:8px;color:var(--ink2);font-size:14px}
+.filter select{padding:7px 10px;border:1px solid var(--line);border-radius:9px;font:inherit;background:#fff}
 td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
 button.del{margin:0;width:auto;padding:4px 12px;background:#fff;color:var(--red);border:1px solid var(--line);font-weight:500}
 button.del:hover{background:#fdecec;filter:none}td.act{text-align:right;width:1%}
@@ -47,8 +63,12 @@ button.del:hover{background:#fdecec;filter:none}td.act{text-align:right;width:1%
 """
 
 
-def render_page(error="", chart="pie"):
-    expenses = load_expenses()
+def render_page(error="", chart="pie", month=""):
+    all_expenses = load_expenses()
+    months = list_months(all_expenses)
+    if month not in months:
+        month = ""
+    expenses = filter_month(all_expenses, month)
     totals = expense_chart.totals_by_category(expenses) if expenses else {}
     total = sum(totals.values())
     top = next(iter(totals), "-")
@@ -56,13 +76,21 @@ def render_page(error="", chart="pie"):
         f"<tr><td>{html.escape(e['date'])}</td><td>{html.escape(e['category'])}</td>"
         f"<td class='n'>{fmt_amount(e['amount'])}</td><td>{html.escape(e.get('notes') or '')}</td>"
         f"<td class='act'><form method='post' action='/delete' onsubmit=\"return confirm('Delete this expense?')\">"
-        f"<input type='hidden' name='index' value='{i}'><button class='del'>Delete</button></form></td></tr>"
-        for i, e in reversed(list(enumerate(expenses))[-15:]))
+        f"<input type='hidden' name='index' value='{i}'><input type='hidden' name='chart' value='{chart}'>"
+        f"<input type='hidden' name='month' value='{month}'><button class='del'>Delete</button></form></td></tr>"
+        for i, e in reversed([(i, e) for i, e in enumerate(all_expenses) if not month or month_of(e) == month][-15:]))
     err = f"<div class='err'>{html.escape(error)}</div>" if error else ""
-    if expenses:
-        tabs = "".join(f"<a href='/?chart={k}' class='{'on' if chart == k else ''}'>{n}</a>"
-                       for k, n in (("pie", "Donut chart"), ("bar", "Bar chart")))
-        chart_html = f"<div class='tabs'>{tabs}</div><img src='/chart.png?kind={chart}&n={len(expenses)}' alt='chart'>"
+    if all_expenses:
+        tabs = "".join(f"<a href='/?{urlencode({'chart': k, 'month': month})}' class='{'on' if chart == k else ''}'>{n}</a>"
+                       for k, n in (("pie", "Donut chart"), ("bar", "Bar chart"), ("trend", "Monthly trend")))
+        options = "<option value=''>All months</option>" + "".join(
+            f"<option value='{m}'{' selected' if m == month else ''}>{m}</option>" for m in months)
+        picker = (f"<form class='filter' method='get' action='/'><input type='hidden' name='chart' value='{chart}'>"
+                  f"Month <select name='month' onchange='this.form.submit()'>{options}</select></form>")
+        img = f"<img src='/chart.png?{urlencode({'kind': chart, 'month': month, 'n': len(all_expenses)})}' alt='chart'>"
+        if chart == "trend":
+            picker = ""  # the trend chart always shows every month
+        chart_html = f"{picker}<div class='tabs'>{tabs}</div>{img}"
     else:
         chart_html = "<div class='empty'>No data yet. Add your first expense on the left.</div>"
     return f"""<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width">
@@ -101,16 +129,20 @@ class Handler(BaseHTTPRequestHandler):
         url = urlparse(self.path)
         q = parse_qs(url.query)
         if url.path == "/chart.png":
-            expenses = load_expenses()
+            kind = q.get("kind", ["pie"])[0]
+            expenses = load_expenses() if kind == "trend" else filter_month(load_expenses(), q.get("month", [""])[0])
             if not expenses:
                 return self._send("no data", "text/plain", 404)
-            totals = expense_chart.totals_by_category(expenses)
-            fn = expense_chart.make_bar if q.get("kind", ["pie"])[0] == "bar" else expense_chart.make_pie
             buf = io.BytesIO()
-            fn(totals, buf)
+            if kind == "trend":
+                expense_trend.make_trend(expense_trend.monthly_totals(expenses), buf)
+            else:
+                totals = expense_chart.totals_by_category(expenses)
+                fn = expense_chart.make_bar if kind == "bar" else expense_chart.make_pie
+                fn(totals, buf)
             return self._send(buf.getvalue(), "image/png")
         if url.path == "/":
-            return self._send(render_page(chart=q.get("chart", ["pie"])[0]))
+            return self._send(render_page(chart=q.get("chart", ["pie"])[0], month=q.get("month", [""])[0]))
         self._send("not found", "text/plain", 404)
 
     def do_POST(self):
@@ -123,8 +155,9 @@ class Handler(BaseHTTPRequestHandler):
                 delete_expense(int(get("index")))
             except (ValueError, IndexError):
                 pass
+            back = urlencode({"chart": get("chart") or "pie", "month": get("month")})
             self.send_response(303)
-            self.send_header("Location", "/")
+            self.send_header("Location", f"/?{back}")
             self.end_headers()
             return
         try:
