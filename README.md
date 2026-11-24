@@ -1,4 +1,4 @@
-# Expense Tracker
+﻿# Expense Tracker
 
 A simple Python expense tracker with a clean browser UI, built by two people using Git.
 Add expenses, filter by date or category, export CSV reports, and visualize spending with a donut chart, a bar chart, and a monthly trend chart.
@@ -65,6 +65,10 @@ python expense_chart.py sample_expenses.csv    # try the bundled sample data
 Data is stored in `expenses.csv` (columns: `date, amount, category, notes`).
 
 ## Sample output
+
+![Sample pie chart](sample_pie_chart.png)
+
+![Sample bar chart](sample_bar_chart.png)
 
 ## Troubleshooting
 
