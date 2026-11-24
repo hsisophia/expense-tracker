@@ -1,4 +1,4 @@
-﻿"""Member B - Web UI enhancements: All/Today toggle, Category/Keyword search, and CSV export.
+﻿"""Member B - Web UI enhancements: Date/Today/Month filter, Category/Keyword search, and CSV export.
 
 Run:  python expense_app.py   then open http://127.0.0.1:8000
 """
@@ -36,12 +36,11 @@ def list_categories(expenses):
     return sorted({e["category"] for e in expenses if e.get("category")})
 
 
-def apply_filters(expenses, month="", today_only=False, category="", keyword=""):
-    """Filter expenses by today/month, category, and keyword (in category or notes)."""
+def apply_filters(expenses, date="", month="", category="", keyword=""):
+    """Filter expenses by exact date or month, category, and keyword (in category or notes)."""
     result = expenses
-    if today_only:
-        today_str = datetime.date.today().isoformat()
-        result = [e for e in result if e["date"] == today_str]
+    if date:
+        result = [e for e in result if e["date"] == date]
     elif month:
         result = [e for e in result if month_of(e) == month]
 
@@ -92,14 +91,19 @@ button.del:hover{background:#fdecec;filter:none}td.act{text-align:right;width:1%
 """
 
 
-def render_page(error="", chart="pie", month="", today="", category="", keyword=""):
+def render_page(error="", chart="pie", date="", month="", category="", keyword=""):
     all_expenses = load_expenses()
     months = list_months(all_expenses)
     categories = list_categories(all_expenses)
+    today_str = datetime.date.today().isoformat()
 
-    today_only = (today == "1")
-    if today_only:
-        month = ""
+    # Validate date format if provided; date filter takes precedence over month
+    if date:
+        try:
+            date = parse_date(date)
+            month = ""
+        except ValueError:
+            date = ""
     elif month not in months:
         month = ""
 
@@ -108,7 +112,7 @@ def render_page(error="", chart="pie", month="", today="", category="", keyword=
 
     indexed_filtered = [
         (i, e) for i, e in enumerate(all_expenses)
-        if e in apply_filters([e], month=month, today_only=today_only, category=category, keyword=keyword)
+        if e in apply_filters([e], date=date, month=month, category=category, keyword=keyword)
     ]
     expenses = [e for _, e in indexed_filtered]
 
@@ -123,15 +127,15 @@ def render_page(error="", chart="pie", month="", today="", category="", keyword=
             f"<td class='act'><form method='post' action='/delete' onsubmit=\"return confirm('Delete this expense?')\">"
             f"<input type='hidden' name='index' value='{i}'>"
             f"<input type='hidden' name='chart' value='{html.escape(chart)}'>"
+            f"<input type='hidden' name='date' value='{html.escape(date)}'>"
             f"<input type='hidden' name='month' value='{html.escape(month)}'>"
-            f"<input type='hidden' name='today' value='{'1' if today_only else ''}'>"
             f"<input type='hidden' name='category' value='{html.escape(category)}'>"
             f"<input type='hidden' name='keyword' value='{html.escape(keyword)}'>"
             f"<button class='del'>Delete</button></form></td></tr>"
             for i, e in reversed(indexed_filtered[-30:])
         )
     else:
-        empty_msg = "No expenses recorded for today yet." if today_only else "No matching expenses found."
+        empty_msg = f"No expenses recorded on {date}." if date else "No matching expenses found."
         rows = f"<tr><td colspan='5' style='text-align:center;color:var(--ink2);padding:24px'>{empty_msg}</td></tr>"
 
     err = f"<div class='err'>{html.escape(error)}</div>" if error else ""
@@ -139,8 +143,8 @@ def render_page(error="", chart="pie", month="", today="", category="", keyword=
     def qs(**overrides):
         params = {
             "chart": chart,
+            "date": date,
             "month": month,
-            "today": "1" if today_only else "",
             "category": category,
             "keyword": keyword,
         }
@@ -155,11 +159,11 @@ def render_page(error="", chart="pie", month="", today="", category="", keyword=
         options = "<option value=''>All months</option>" + "".join(
             f"<option value='{m}'{' selected' if m == month else ''}>{m}</option>" for m in months
         )
-        all_url = f"/?{qs(today='', month='')}"
-        today_url = f"/?{qs(today='1', month='')}"
+        all_url = f"/?{qs(date='', month='')}"
+        today_url = f"/?{qs(date=today_str, month='')}"
         mode_btns = (
-            f"<a href='{all_url}' class='pill-btn {'on' if not today_only and not month else ''}'>All</a>"
-            f"<a href='{today_url}' class='pill-btn {'on' if today_only else ''}'>Today ({datetime.date.today().isoformat()})</a>"
+            f"<a href='{all_url}' class='pill-btn {'on' if not date and not month else ''}'>All</a>"
+            f"<a href='{today_url}' class='pill-btn {'on' if date == today_str else ''}'>Today</a>"
         )
         picker = (
             f"<div class='filter'>{mode_btns}"
@@ -167,7 +171,14 @@ def render_page(error="", chart="pie", month="", today="", category="", keyword=
             f"<input type='hidden' name='chart' value='{html.escape(chart)}'>"
             f"<input type='hidden' name='category' value='{html.escape(category)}'>"
             f"<input type='hidden' name='keyword' value='{html.escape(keyword)}'>"
-            f"<span>or Month</span> <select name='month' onchange='this.form.submit()'>{options}</select></form></div>"
+            f"<span>Date</span> <input type='date' name='date' value='{html.escape(date)}' onchange='this.form.submit()'>"
+            f"</form>"
+            f"<form method='get' action='/' style='display:inline-flex;align-items:center;gap:6px;margin:0'>"
+            f"<input type='hidden' name='chart' value='{html.escape(chart)}'>"
+            f"<input type='hidden' name='category' value='{html.escape(category)}'>"
+            f"<input type='hidden' name='keyword' value='{html.escape(keyword)}'>"
+            f"<span>Month</span> <select name='month' onchange='this.form.submit()'>{options}</select>"
+            f"</form></div>"
         )
         if chart == "trend":
             picker = ""
@@ -175,15 +186,15 @@ def render_page(error="", chart="pie", month="", today="", category="", keyword=
         if expenses or chart == "trend":
             img_qs = urlencode({
                 "kind": chart,
+                "date": date,
                 "month": month,
-                "today": "1" if today_only else "",
                 "category": category,
                 "keyword": keyword,
                 "n": len(all_expenses),
             })
             img = f"<img src='/chart.png?{img_qs}' alt='chart'>"
         else:
-            img = f"<div class='empty'>{'No expenses recorded for today.' if today_only else 'No data for current filter.'}</div>"
+            img = f"<div class='empty'>{f'No expenses recorded on {date}.' if date else 'No data for current filter.'}</div>"
 
         chart_html = f"{picker}<div class='tabs'>{tabs}</div>{img}"
     else:
@@ -194,7 +205,7 @@ def render_page(error="", chart="pie", month="", today="", category="", keyword=
         for c in categories
     )
     export_url = f"/export.csv?{qs()}"
-    reset_url = f"/?{qs(category='', keyword='', today='', month='')}"
+    reset_url = f"/?{qs(category='', keyword='', date='', month='')}"
 
     return f"""<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width">
 <title>Expense Tracker</title><style>{CSS}</style>
@@ -212,15 +223,15 @@ def render_page(error="", chart="pie", month="", today="", category="", keyword=
 <datalist id="cats"><option>Food<option>Transport<option>Shopping<option>Entertainment<option>Education</datalist>
 <label>Notes (optional)</label><input name="notes" placeholder="Lunch with friends">
 <button>Add expense</button></form>
-<script>document.querySelector('input[type=date]').valueAsDate=new Date()</script></section>
+<script>document.querySelector('form[action="/add"] input[type=date]').valueAsDate=new Date()</script></section>
 <section class="card chart"><h2>Spending by category</h2>{chart_html}</section>
 <section class="card wide">
 <div class="table-bar">
 <h2>Recent expenses</h2>
 <form class="filter" method="get" action="/" style="margin:0">
 <input type="hidden" name="chart" value="{html.escape(chart)}">
+<input type="hidden" name="date" value="{html.escape(date)}">
 <input type="hidden" name="month" value="{html.escape(month)}">
-<input type="hidden" name="today" value="{'1' if today_only else ''}">
 <select name="category" onchange="this.form.submit()">{cat_options}</select>
 <input type="text" name="keyword" value="{html.escape(keyword)}" placeholder="Search notes or category..." style="width:190px">
 <button type="submit" class="pill-btn on" style="margin:0;width:auto">Search</button>
@@ -248,8 +259,8 @@ class Handler(BaseHTTPRequestHandler):
         url = urlparse(self.path)
         q = parse_qs(url.query)
         chart = q.get("chart", ["pie"])[0]
+        date = q.get("date", [""])[0]
         month = q.get("month", [""])[0]
-        today = q.get("today", [""])[0]
         category = q.get("category", [""])[0]
         keyword = q.get("keyword", [""])[0]
 
@@ -261,8 +272,8 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 expenses = apply_filters(
                     all_expenses,
+                    date=date,
                     month=month,
-                    today_only=(today == "1"),
                     category=category,
                     keyword=keyword,
                 )
@@ -280,8 +291,8 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/export.csv":
             filtered = apply_filters(
                 load_expenses(),
+                date=date,
                 month=month,
-                today_only=(today == "1"),
                 category=category,
                 keyword=keyword,
             )
@@ -291,7 +302,7 @@ class Handler(BaseHTTPRequestHandler):
             for e in filtered:
                 writer.writerow([e["date"], e["amount"], e["category"], e.get("notes", "")])
             csv_bytes = ("\ufeff" + buf.getvalue()).encode("utf-8")
-            filename = f"expenses_{datetime.date.today().isoformat()}.csv" if today == "1" else "expenses_filtered.csv"
+            filename = f"expenses_{date}.csv" if date else "expenses_filtered.csv"
             return self._send(
                 csv_bytes,
                 "text/csv; charset=utf-8",
@@ -302,8 +313,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(
                 render_page(
                     chart=chart,
+                    date=date,
                     month=month,
-                    today=today,
                     category=category,
                     keyword=keyword,
                 )
@@ -322,8 +333,8 @@ class Handler(BaseHTTPRequestHandler):
                 pass
             params = {
                 "chart": get("chart") or "pie",
+                "date": get("date"),
                 "month": get("month"),
-                "today": get("today"),
                 "category": get("category"),
                 "keyword": get("keyword"),
             }
